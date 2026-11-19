@@ -1,0 +1,15 @@
+</main>
+<footer class="footer">
+  <div class="wrap">
+    <p class="sync">
+      <% if (syncInfo.error) { %>
+        <span class="warn">Match data not refreshing: <%= syncInfo.error %></span> ·
+      <% } %>
+      Match data last updated <%= fmt.ago(syncInfo.ok) %>.
+    </p>
+    <p>Football data provided by the Football-Data.org API.</p>
+    <p>SG Bools is a private bet-sharing board. It handles no money and is not affiliated with Singapore Pools.</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<%- include('partials/head', { title: match.home_team + ' vs ' + match.away_team }) %>
+<section class="matchhead">
+  <div class="mh-comp"><span class="comp comp-<%= match.competition %>"><%= match.competition === 'PL' ? 'EPL' : 'UCL' %></span> <%= match.competition_name %><% if (match.matchday) { %> · Matchday <%= match.matchday %><% } %></div>
+  <div class="mh-teams">
+    <span class="team"><%= match.home_team %></span>
+    <span class="score">
+      <% if (match.home_score != null && ['FINISHED','IN_PLAY','PAUSED'].includes(match.status)) { %><%= match.home_score %> – <%= match.away_score %><% } else { %>vs<% } %>
+    </span>
+    <span class="team"><%= match.away_team %></span>
+  </div>
+  <div class="mh-meta">
+    <%= fmt.sgDateTime(match.kickoff_utc) %> SGT ·
+    <% if (open) { %><span class="pill pill-open">Open for bets</span>
+    <% } else if (match.status === 'FINISHED') { %><span class="pill">Full time (90 min)</span>
+    <% } else if (['POSTPONED','CANCELLED','AWARDED'].includes(match.status)) { %><span class="pill pill-void"><%= match.status.toLowerCase() %> — bets void</span>
+    <% } else { %><span class="pill pill-live">Started — bets locked</span><% } %>
+  </div>
+</section>
+
+<% if (open) { %>
+<section class="panel">
+  <h2>Post a bet</h2>
+  <% if (duplicates) { %>
+    <div class="flash flash-warn">
+      <strong>Already bought:</strong>
+      <%= [...new Set(duplicates.map(d => d.display_name))].join(', ') %>
+      <%= duplicates.length === 1 ? 'has' : 'have' %> already posted <em><%= b.selectionLabel({ ...form, ...duplicates[0] }, match) %></em> on this match.
+      Post it anyway?
+    </div>
+  <% } %>
+  <form method="post" action="/matches/<%= match.id %>/bets" class="betform">
+    <%- include('partials/betform', { form, errors, match }) %>
+    <% if (duplicates) { %><input type="hidden" name="confirm_duplicate" value="yes"><% } %>
+    <button class="btn"><%= duplicates ? 'Yes, post it anyway' : 'Post bet' %></button>
+  </form>
+</section>
+<% } %>
+
+<section>
+  <h2 class="section-title">Bets on this match <span class="muted">(<%= betCount %>)</span></h2>
+  <% if (!groups.length) { %><p class="empty">Nobody has posted a bet on this match yet.</p><% } %>
+  <% groups.forEach(g => { %>
+  <div class="group">
+    <div class="group-head">
+      <span class="type"><%= b.TYPE_NAMES[g.type] %></span>
+      <strong><%= g.label %></strong>
+      <span class="people"><%= g.people.map(p => p.count > 1 ? p.name + ' ×' + p.count : p.name).join(', ') %></span>
+    </div>
+    <div class="slips">
+      <% g.bets.forEach(bet => { %><%- include('partials/betcard', { bet, hideMatch: true }) %><% }) %>
+    </div>
+  </div>
+  <% }) %>
+</section>
+<%- include('partials/foot') %>

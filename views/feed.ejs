@@ -1,0 +1,23 @@
+<%- include('partials/head', { title: 'Feed' }) %>
+<div class="pagehead">
+  <h1>Latest bets</h1>
+  <div class="tabs">
+    <a href="/?tab=all" class="<%= tab === 'all' ? 'on' : '' %>">All</a>
+    <a href="/?tab=pending" class="<%= tab === 'pending' ? 'on' : '' %>">Pending</a>
+    <a href="/?tab=settled" class="<%= tab === 'settled' ? 'on' : '' %>">Settled</a>
+  </div>
+</div>
+<% if (!rows.length) { %>
+  <p class="empty">No bets here yet. Pick a match on the <a href="/matches">Matches</a> board and post one.</p>
+<% } %>
+<div class="slips">
+  <% rows.forEach(bet => { %><%- include('partials/betcard', { bet }) %><% }) %>
+</div>
+<% if (pages > 1) { %>
+<nav class="pager">
+  <% if (page > 1) { %><a href="/?tab=<%= tab %>&page=<%= page - 1 %>">← Newer</a><% } else { %><span></span><% } %>
+  <span>Page <%= page %> of <%= pages %></span>
+  <% if (page < pages) { %><a href="/?tab=<%= tab %>&page=<%= page + 1 %>">Older →</a><% } else { %><span></span><% } %>
+</nav>
+<% } %>
+<%- include('partials/foot') %>

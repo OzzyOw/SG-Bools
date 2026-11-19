@@ -1,0 +1,40 @@
+<%- include('partials/head', { title: 'Matches' }) %>
+<div class="pagehead">
+  <h1>Upcoming matches</h1>
+  <span class="muted">Next 7 days · <%= count %> matches · times in SGT</span>
+</div>
+<% if (!days.length) { %>
+  <p class="empty">No upcoming matches loaded. If this persists, check the match data note at the bottom of the page.</p>
+<% } %>
+<% days.forEach(day => { %>
+<section class="board">
+  <h2 class="board-day"><%= day.label %></h2>
+  <table class="board-table">
+    <thead>
+      <tr>
+        <th class="c-time">Time</th>
+        <th class="c-match">Match</th>
+        <th title="1X2 bets">1X2</th>
+        <th title="Asian Handicap bets">AH</th>
+        <th title="Over/Under bets">O/U</th>
+        <th title="Correct Score bets">CS</th>
+        <th title="Other bets">Oth</th>
+        <th class="c-total">Bets</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% day.matches.forEach(m => { %>
+      <tr onclick="location.href='/matches/<%= m.id %>'">
+        <td class="c-time"><%= fmt.sgTime(m.kickoff_utc) %><span class="comp comp-<%= m.competition %>"><%= m.competition === 'PL' ? 'EPL' : 'UCL' %></span></td>
+        <td class="c-match"><a href="/matches/<%= m.id %>"><%= m.home_team %> <span class="vs">vs</span> <%= m.away_team %></a></td>
+        <% [m.n_1x2, m.n_ah, m.n_ou, m.n_cs, m.n_other].forEach(n => { %>
+          <td class="cnt <%= n ? 'has' : '' %>"><%= n || '–' %></td>
+        <% }) %>
+        <td class="c-total"><strong><%= m.bet_total %></strong></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<% }) %>
+<%- include('partials/foot') %>

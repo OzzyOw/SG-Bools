@@ -1,0 +1,13 @@
+<%- include('partials/head', { title: 'Account' }) %>
+<section class="panel auth">
+  <h1>Account</h1>
+  <p><strong><%= user.display_name %></strong> <span class="muted">(@<%= user.username %>)</span> · <a href="/members/<%= user.id %>">My bets</a></p>
+  <h2>Change password</h2>
+  <% if (error) { %><div class="flash flash-err"><%= error %></div><% } %>
+  <form method="post" action="/account/password">
+    <div class="field"><label for="current">Current password</label><input id="current" name="current" type="password" autocomplete="current-password"></div>
+    <div class="field"><label for="next">New password</label><input id="next" name="next" type="password" autocomplete="new-password"></div>
+    <button class="btn">Change password</button>
+  </form>
+</section>
+<%- include('partials/foot') %>

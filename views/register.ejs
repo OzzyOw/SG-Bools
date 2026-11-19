@@ -1,0 +1,14 @@
+<%- include('partials/head', { title: 'Register' }) %>
+<section class="panel auth">
+  <h1>Join SG Bools</h1>
+  <% if (error) { %><div class="flash flash-err"><%= error %></div><% } %>
+  <form method="post" action="/register">
+    <div class="field"><label for="invite">Invite code</label><input id="invite" name="invite" value="<%= form.invite ?? '' %>"></div>
+    <div class="field"><label for="username">Username <small>(for logging in)</small></label><input id="username" name="username" value="<%= form.username ?? '' %>" autocomplete="username"></div>
+    <div class="field"><label for="display_name">Display name <small>(shown on your bets, e.g. "Mum")</small></label><input id="display_name" name="display_name" value="<%= form.display_name ?? '' %>"></div>
+    <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password"></div>
+    <button class="btn">Create account</button>
+  </form>
+  <p class="muted">Already a member? <a href="/login">Log in</a>.</p>
+</section>
+<%- include('partials/foot') %>

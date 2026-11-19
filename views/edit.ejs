@@ -1,0 +1,25 @@
+<%- include('partials/head', { title: 'Edit bet' }) %>
+<section class="panel">
+  <h1><%= open ? 'Edit bet' : 'Edit description' %></h1>
+  <p class="muted"><a href="/matches/<%= match.id %>"><%= match.home_team %> vs <%= match.away_team %></a> · <%= fmt.sgDateTime(match.kickoff_utc) %> SGT</p>
+  <% if (open) { %>
+    <form method="post" action="/bets/<%= bet.id %>/edit" class="betform">
+      <%- include('partials/betform', { form, errors, match }) %>
+      <button class="btn">Save changes</button>
+      <a href="/matches/<%= match.id %>" class="btn btn-ghost">Cancel</a>
+    </form>
+  <% } else { %>
+    <p class="locked">This match has kicked off, so the bet is locked. Only the description can change.</p>
+    <p><strong><%= b.selectionLabel(bet) %></strong> @ <%= fmt.odds(bet.odds_100) %> · Stake <%= fmt.money(bet.stake_cents) %></p>
+    <% if (errors.length) { %><div class="flash flash-err"><%= errors.join(' ') %></div><% } %>
+    <form method="post" action="/bets/<%= bet.id %>/edit" class="betform">
+      <div class="field">
+        <label for="description">Why?</label>
+        <textarea id="description" name="description" maxlength="500" rows="3"><%= form.description %></textarea>
+      </div>
+      <button class="btn">Save description</button>
+      <a href="/matches/<%= match.id %>" class="btn btn-ghost">Cancel</a>
+    </form>
+  <% } %>
+</section>
+<%- include('partials/foot') %>

@@ -1,0 +1,17 @@
+<%- include('partials/head', { title: member.display_name }) %>
+<% const r = records[member.id]; %>
+<section class="memberhead">
+  <h1><%= member.display_name %></h1>
+  <div class="stats">
+    <div><strong><%= r.wins %></strong><span>Won</span></div>
+    <div><strong><%= r.losses %></strong><span>Lost</span></div>
+    <div><strong><%= r.pending %></strong><span>Pending</span></div>
+    <div><strong class="<%= fmt.moneyClass(r.netCents) %>"><%= fmt.money(r.netCents, { sign: true }) %></strong><span>Net</span></div>
+  </div>
+  <p class="muted">Half wins count as W, half losses as L. Pushes and voids count as neither.</p>
+</section>
+<% if (!list.length) { %><p class="empty"><%= member.display_name %> hasn't posted any bets yet.</p><% } %>
+<div class="slips">
+  <% list.forEach(bet => { %><%- include('partials/betcard', { bet }) %><% }) %>
+</div>
+<%- include('partials/foot') %>

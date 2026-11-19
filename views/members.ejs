@@ -1,0 +1,15 @@
+<%- include('partials/head', { title: 'Members' }) %>
+<div class="pagehead"><h1>Members</h1><span class="muted">Sorted by net result</span></div>
+<table class="board-table members">
+  <thead><tr><th class="c-match">Member</th><th>W</th><th>L</th><th>Pending</th><th class="c-total">Net</th></tr></thead>
+  <tbody>
+    <% users.forEach(u => { const r = records[u.id]; %>
+    <tr onclick="location.href='/members/<%= u.id %>'">
+      <td class="c-match"><a href="/members/<%= u.id %>"><%= u.display_name %></a></td>
+      <td><%= r.wins %></td><td><%= r.losses %></td><td><%= r.pending %></td>
+      <td class="c-total <%= fmt.moneyClass(r.netCents) %>"><strong><%= fmt.money(r.netCents, { sign: true }) %></strong></td>
+    </tr>
+    <% }) %>
+  </tbody>
+</table>
+<%- include('partials/foot') %>

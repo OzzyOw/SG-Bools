@@ -1,0 +1,27 @@
+{
+  "name": "sg-bools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private, local-only bet sharing board for a family/friends group.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "seed": "node --env-file-if-exists=.env scripts/seed.js",
+    "reset-password": "node --env-file-if-exists=.env scripts/reset-password.js",
+    "test": "node --test test/",
+    "add-pending": "node --env-file-if-exists=.env scripts/add-pending.js",
+    "demo:record": "node --env-file-if-exists=.env scripts/record-demo.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "ejs": "^7.0.2",
+    "express": "^4.22.3",
+    "express-session": "^1.19.0"
+  },
+  "devDependencies": {
+    "fix-webm-duration": "^1.0.6",
+    "playwright-core": "^1.65.1"
+  }
+}

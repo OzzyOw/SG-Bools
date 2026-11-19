@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= typeof title !== 'undefined' ? title + ' · SG Bools' : 'SG Bools' %></title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="logo" href="/">SG <span>Bools</span></a>
+    <% if (user) { %>
+    <nav class="nav">
+      <a href="/" class="<%= path === '/' ? 'on' : '' %>">Feed</a>
+      <a href="/matches" class="<%= path.startsWith('/matches') ? 'on' : '' %>">Matches</a>
+      <a href="/members" class="<%= path.startsWith('/members') ? 'on' : '' %>">Members</a>
+    </nav>
+    <div class="me">
+      <a href="/account"><%= user.display_name %></a>
+      <form method="post" action="/logout"><button class="linkbtn">Log out</button></form>
+    </div>
+    <% } %>
+  </div>
+</header>
+<div class="subbar"><div class="wrap">Football · English Premier League · UEFA Champions League</div></div>
+<main class="wrap">
+<% if (flash) { %><div class="flash flash-<%= flash.type %>"><%= flash.text %></div><% } %>

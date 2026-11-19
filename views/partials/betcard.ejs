@@ -1,0 +1,57 @@
+<%
+  const mine = user && bet.user_id === user.id;
+  const matchRow = { id: bet.match_id, status: bet.match_status, kickoff_utc: bet.kickoff_utc };
+  const open = b.isMatchOpen(matchRow);
+  const finished = bet.match_status === 'FINISHED';
+  const showMatch = typeof hideMatch === 'undefined' || !hideMatch;
+%>
+<article class="slip res-<%= bet.result.toLowerCase() %>">
+  <div class="slip-who">
+    <a class="who" href="/members/<%= bet.user_id %>"><%= bet.display_name %></a>
+    <%- include('record', { uid: bet.user_id }) %>
+  </div>
+  <% if (showMatch) { %>
+  <div class="slip-match">
+    <span class="comp comp-<%= bet.competition %>"><%= bet.competition === 'PL' ? 'EPL' : 'UCL' %></span>
+    <a href="/matches/<%= bet.match_id %>"><%= bet.home_team %> vs <%= bet.away_team %></a>
+    <span class="when">
+      <% if (bet.home_score != null && finished) { %><strong class="ft">FT <%= bet.home_score %>–<%= bet.away_score %></strong>
+      <% } else { %><%= fmt.sgDateTime(bet.kickoff_utc) %><% } %>
+    </span>
+  </div>
+  <% } %>
+  <div class="slip-sel">
+    <span class="type"><%= b.TYPE_NAMES[bet.bet_type] %></span>
+    <strong><%= b.selectionLabel(bet) %></strong>
+    <span class="odds">@ <%= fmt.odds(bet.odds_100) %></span>
+  </div>
+  <div class="slip-money">
+    <span>Stake <%= fmt.money(bet.stake_cents) %></span>
+    <span class="badge badge-<%= bet.result.toLowerCase() %>"><%= b.RESULT_LABELS[bet.result] %></span>
+    <% if (bet.profit_cents != null) { %>
+      <span class="<%= fmt.moneyClass(bet.profit_cents) %>"><%= fmt.money(bet.profit_cents, { sign: true }) %></span>
+    <% } %>
+  </div>
+  <% if (bet.description) { %><p class="desc">“<%= bet.description %>”</p><% } %>
+  <div class="slip-foot">
+    <span class="posted">Posted <%= fmt.sgDateTime(bet.created_at) %></span>
+    <% if (mine) { %>
+      <span class="actions">
+        <% if (open) { %>
+          <a href="/bets/<%= bet.id %>/edit">Edit</a>
+          <form method="post" action="/bets/<%= bet.id %>/delete" onsubmit="return confirm('Delete this bet?')"><button class="linkbtn danger">Delete</button></form>
+        <% } else { %>
+          <a href="/bets/<%= bet.id %>/edit">Edit description</a>
+        <% } %>
+        <% if (bet.bet_type === 'OTHER' && bet.result === 'PENDING' && finished) { %>
+          <form method="post" action="/bets/<%= bet.id %>/settle" class="settle">
+            Settle:
+            <button name="result" value="WON" class="linkbtn">Won</button>
+            <button name="result" value="LOST" class="linkbtn">Lost</button>
+            <button name="result" value="VOID" class="linkbtn">Void</button>
+          </form>
+        <% } %>
+      </span>
+    <% } %>
+  </div>
+</article>
