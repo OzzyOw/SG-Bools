@@ -208,6 +208,19 @@ export function settleMatch(match) {
 }
 
 /**
+ * Escape hatch for a match the API never finalises: void every pending bet on it, "Other" included.
+ * If the API later reschedules the match (SCHEDULED/TIMED), reopenVoidedBets puts them back to pending.
+ * Returns the number of bets voided.
+ */
+export function voidPendingBets(matchId) {
+  const pending = getDb().prepare("SELECT * FROM bets WHERE match_id = ? AND result = 'PENDING'").all(matchId);
+  tx(() => {
+    for (const bet of pending) writeResult(bet, 'VOID');
+  });
+  return pending.length;
+}
+
+/**
  * A postponed match that comes back with a new kickoff is open again: bets voided by the
  * postponement go back to pending so they settle on the rescheduled game.
  * (Owners only settle "Other" bets on FINISHED matches, so any VOID here came from a postponement.)

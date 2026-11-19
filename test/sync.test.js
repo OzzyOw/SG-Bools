@@ -77,7 +77,7 @@ test('a postponed match that is rescheduled reopens its voided bets, which then 
   assert.equal(get(a).result, 'WON');
 });
 
-test('activeSpans: finished-without-score stays active; old stuck matches drop out of the window', () => {
+test('activeSpans: finished-without-score stays active; old stuck matches drop out of the window (stuckMatchIds covers them while bets are pending)', () => {
   const at = (id, status, utcDate, score = {}) => ({ ...apiMatch(id, status, score), utcDate, competition: { code: 'CL', name: 'Champions League' } });
   const now = Date.parse('2026-11-20T12:00:00Z');
   upsertMatches([

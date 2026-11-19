@@ -55,6 +55,7 @@ New members register at `/register` with the invite code from `.env` (`INVITE_CO
 | `npm run demo:record` | With the app running, records a ~1 min captioned demo with click sounds to `demo/sg-bools-demo.webm` (uses installed Microsoft Edge; leaves the data as it found it) |
 | `npm test` | Settlement / money / sync tests (Node's built-in test runner) |
 | `npm run reset-password -- <username> <new-password>` | Reset a forgotten password |
+| `npm run void-match -- <match id>` | Void the pending bets on a match the API never finalises (id from the `/matches/<id>` URL). Use only when sync can't settle it. |
 
 ### `.env` settings
 
@@ -71,7 +72,8 @@ New members register at `/register` with the invite code from `.env` (`INVITE_CO
 - **Stack:** Node + Express, server-rendered EJS pages, plain JavaScript, SQLite via `node:sqlite`.
 - **Match data:** football-data.org free plan, EPL (`PL`) and Champions League (`CL`).
   Upcoming fixtures (next 7 days) refresh every 6 hours and at startup; matches that have kicked
-  off but aren't final are checked every 5 minutes. On startup it catches up on anything missed
+  off but aren't final are checked every 5 minutes, and any older match that still has pending
+  bets is re-fetched by id until it settles. On startup it catches up on anything missed
   while the laptop was off. If the API is down the app keeps working from saved data and the
   footer says when data was last updated. Free-plan scores are delayed, so settlement lags full
   time a little.

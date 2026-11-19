@@ -1,5 +1,6 @@
 // football-data.org client + background sync.
-// Free plan: 10 requests/minute. Each sync run makes at most one request per competition.
+// Free plan: 10 requests/minute. A sync run makes one request per competition with unsettled
+// recent matches, plus one per IDS_PER_REQUEST older matches that still have pending bets.
 import { getDb, getMeta, setMeta, nowIso } from './db.js';
 import { settleMatch, reopenVoidedBets, SETTLE_STATUSES, VOID_STATUSES } from './bets.js';
 
@@ -7,9 +8,12 @@ export const COMPETITIONS = ['PL', 'CL'];
 const API = 'https://api.football-data.org/v4';
 const FINAL_STATUSES = [...SETTLE_STATUSES, ...VOID_STATUSES];
 const DAY = 24 * 60 * 60 * 1000;
-// How far back syncActive looks for unfinished matches. Bounds the request's date span, so one
-// match the API never finalises (suspended, dropped) can't make every sync fetch a growing range.
+// How far back syncActive looks for unfinished matches by date. Bounds the request's date span, so
+// one match the API never finalises (suspended, dropped) can't make every sync fetch a growing range.
+// Older matches are only re-fetched (by id) while someone still has a pending bet on them.
 const ACTIVE_LOOKBACK_DAYS = 10;
+const IDS_PER_REQUEST = 20;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export function hasApiKey() {
   return Boolean(process.env.FOOTBALL_DATA_API_KEY);
@@ -17,16 +21,27 @@ export function hasApiKey() {
 
 const ymd = (d) => d.toISOString().slice(0, 10);
 
-/** Fetch one competition's matches between two dates (inclusive). */
-export async function fetchMatches(competition, from, to) {
-  const url = `${API}/competitions/${competition}/matches?dateFrom=${ymd(from)}&dateTo=${ymd(to)}`;
-  const res = await fetch(url, { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } });
+async function getMatches(url, label) {
+  const res = await fetch(url, {
+    headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`football-data.org ${res.status} for ${competition}: ${body.slice(0, 200)}`);
+    throw new Error(`football-data.org ${res.status} for ${label}: ${body.slice(0, 200)}`);
   }
   const json = await res.json();
   return json.matches ?? [];
+}
+
+/** Fetch one competition's matches between two dates (inclusive). */
+export function fetchMatches(competition, from, to) {
+  return getMatches(`${API}/competitions/${competition}/matches?dateFrom=${ymd(from)}&dateTo=${ymd(to)}`, competition);
+}
+
+/** Fetch specific matches by football-data.org id, whatever their date. */
+export function fetchMatchesByIds(ids) {
+  return getMatches(`${API}/matches?ids=${ids.join(',')}`, `matches ${ids.join(',')}`);
 }
 
 /** The 90-minute score: regularTime when the match went to extra time / penalties, else fullTime. */
@@ -80,53 +95,107 @@ export async function syncUpcoming() {
   return { count, settled };
 }
 
+const ph = (list) => list.map(() => '?').join(',');
+// Kicked-off match whose bets can't settle yet: not final, or finished without a score.
+const UNRESOLVED = `(m.status NOT IN (${ph(FINAL_STATUSES)})
+                     OR (m.status IN (${ph(SETTLE_STATUSES)}) AND m.home_score IS NULL))`;
+const UNRESOLVED_ARGS = [...FINAL_STATUSES, ...SETTLE_STATUSES];
+
 /**
  * Matches from the last ACTIVE_LOOKBACK_DAYS that have kicked off but are not settled yet
  * (live, just finished, finished without a score yet, or missed while the laptop was off).
  * Re-fetch the date span they cover, one request per competition.
  */
 export function activeSpans(now = Date.now()) {
-  const ph = (list) => list.map(() => '?').join(',');
   return getDb()
     .prepare(`SELECT competition, MIN(kickoff_utc) AS first, MAX(kickoff_utc) AS last
-              FROM matches
-              WHERE kickoff_utc <= ? AND kickoff_utc >= ?
-                AND (status NOT IN (${ph(FINAL_STATUSES)})
-                     OR (status IN (${ph(SETTLE_STATUSES)}) AND home_score IS NULL))
+              FROM matches m
+              WHERE kickoff_utc <= ? AND kickoff_utc >= ? AND ${UNRESOLVED}
               GROUP BY competition`)
-    .all(new Date(now).toISOString(), new Date(now - ACTIVE_LOOKBACK_DAYS * DAY).toISOString(),
-      ...FINAL_STATUSES, ...SETTLE_STATUSES);
+    .all(new Date(now).toISOString(), new Date(now - ACTIVE_LOOKBACK_DAYS * DAY).toISOString(), ...UNRESOLVED_ARGS);
 }
 
-export async function syncActive() {
-  const active = activeSpans();
+/**
+ * Ids of unresolved matches of any age whose stored kickoff has passed and that still have
+ * PENDING bets. Date-range requests can miss these: the laptop was off for longer than the
+ * lookback, the API finalised a suspended match weeks later, or the fixture moved to a date
+ * outside every window. Fetching them by id covers all three.
+ */
+export function stuckMatchIds(now = Date.now()) {
+  return getDb()
+    .prepare(`SELECT m.id FROM matches m
+              WHERE m.kickoff_utc <= ? AND ${UNRESOLVED}
+                AND EXISTS (SELECT 1 FROM bets b WHERE b.match_id = m.id AND b.result = 'PENDING')
+              ORDER BY m.kickoff_utc, m.id`)
+    .all(new Date(now).toISOString(), ...UNRESOLVED_ARGS)
+    .map((r) => r.id);
+}
+
+/**
+ * Refresh kicked-off, unsettled matches: recent ones by date span per competition, then (by id)
+ * any with pending bets that the spans did not return. A failing request doesn't stop the others;
+ * the errors are returned for the caller to report.
+ */
+export async function syncActive(now = Date.now()) {
+  let requests = 0;
   let settled = 0;
-  for (const a of active) {
-    const ms = await fetchMatches(a.competition, new Date(a.first), new Date(Math.max(Date.parse(a.last), Date.now())));
-    settled += upsertMatches(ms);
+  const errors = [];
+  const seen = new Set();
+  const run = async (load) => {
+    requests++;
+    try {
+      const ms = await load();
+      for (const m of ms) seen.add(m.id);
+      settled += upsertMatches(ms);
+    } catch (err) {
+      errors.push(err.message);
+    }
+  };
+
+  for (const a of activeSpans(now)) {
+    await run(() => fetchMatches(a.competition, new Date(a.first), new Date(Math.max(Date.parse(a.last), now))));
   }
-  return { competitions: active.length, settled };
+  const stuck = stuckMatchIds(now).filter((id) => !seen.has(id));
+  for (let i = 0; i < stuck.length; i += IDS_PER_REQUEST) {
+    await run(() => fetchMatchesByIds(stuck.slice(i, i + IDS_PER_REQUEST)));
+  }
+  return { requests, settled, errors };
 }
 
-/** One scheduler tick: always check active matches; refresh upcoming every 6 hours. */
+/** One scheduler tick: always check active matches; refresh upcoming every 6 hours. Never rejects. */
 export async function syncTick({ force = false } = {}) {
-  if (!hasApiKey()) {
-    setMeta('last_sync_error', 'FOOTBALL_DATA_API_KEY is not set in .env');
-    return;
-  }
   try {
+    if (!hasApiKey()) {
+      setMeta('last_sync_error', 'FOOTBALL_DATA_API_KEY is not set in .env');
+      return;
+    }
+    const errors = [];
     const last = getMeta('last_upcoming_sync');
     if (force || !last || Date.now() - Date.parse(last) > 6 * 60 * 60 * 1000) {
-      const r = await syncUpcoming();
-      console.log(`[sync] upcoming: ${r.count} matches, ${r.settled} bets settled`);
+      try {
+        const r = await syncUpcoming();
+        console.log(`[sync] upcoming: ${r.count} matches, ${r.settled} bets settled`);
+      } catch (err) {
+        errors.push(err.message); // still check active matches below
+      }
     }
     const a = await syncActive();
-    if (a.competitions) console.log(`[sync] active: ${a.competitions} competition(s) checked, ${a.settled} bets settled`);
-    setMeta('last_sync_ok', nowIso());
-    setMeta('last_sync_error', null);
+    errors.push(...a.errors);
+    if (a.requests) console.log(`[sync] active: ${a.requests} request(s), ${a.settled} bets settled`);
+    if (errors.length) {
+      for (const e of errors) console.error('[sync] failed:', e);
+      setMeta('last_sync_error', errors.join(' | '));
+    } else {
+      setMeta('last_sync_ok', nowIso());
+      setMeta('last_sync_error', null);
+    }
   } catch (err) {
     console.error('[sync] failed:', err.message);
-    setMeta('last_sync_error', err.message);
+    try {
+      setMeta('last_sync_error', err.message);
+    } catch {
+      // database unavailable too: nothing more to record this tick
+    }
   }
 }
 
