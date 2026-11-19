@@ -10,6 +10,7 @@
     "reset-password": "node --env-file-if-exists=.env scripts/reset-password.js",
     "test": "node --test test/",
     "add-pending": "node --env-file-if-exists=.env scripts/add-pending.js",
+    "void-match": "node --env-file-if-exists=.env scripts/void-match.js",
     "demo:record": "node --env-file-if-exists=.env scripts/record-demo.js"
   },
   "engines": {
