@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "seed": "node --env-file-if-exists=.env scripts/seed.js",
+    "seed:demo": "node --env-file-if-exists=.env scripts/seed.js --demo",
     "reset-password": "node --env-file-if-exists=.env scripts/reset-password.js",
+    "remove-member": "node --env-file-if-exists=.env scripts/remove-member.js",
     "test": "node --test test/",
     "add-pending": "node --env-file-if-exists=.env scripts/add-pending.js",
     "demo:record": "node --env-file-if-exists=.env scripts/record-demo.js"

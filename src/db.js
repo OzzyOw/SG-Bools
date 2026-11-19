@@ -2,13 +2,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { hashPassword, isHashed } from './auth.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id           INTEGER PRIMARY KEY,
   username     TEXT NOT NULL UNIQUE COLLATE NOCASE,
   display_name TEXT NOT NULL,
-  password     TEXT NOT NULL,            -- plain text on purpose: demo only (see README)
+  password     TEXT NOT NULL,            -- scrypt hash "scrypt$<salt>$<hash>" (src/auth.js)
+  session_epoch INTEGER NOT NULL DEFAULT 0, -- bumped on password change; older sessions stop working
   created_at   TEXT NOT NULL
 );
 
@@ -66,7 +68,26 @@ export function getDb() {
   db = new DatabaseSync(file);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// Bring databases created by older versions up to date.
+export function migrate(d) {
+  const cols = d.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('session_epoch')) d.exec('ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0');
+  // Earlier versions stored passwords in plain text: hash them in place.
+  const update = d.prepare('UPDATE users SET password = ? WHERE id = ?');
+  for (const u of d.prepare('SELECT id, password FROM users').all()) {
+    if (!isHashed(u.password)) update.run(hashPassword(u.password), u.id);
+  }
+}
+
+/** Store a new password and end every existing login session for that member. */
+export function setPassword(userId, password) {
+  return getDb()
+    .prepare('UPDATE users SET password = ?, session_epoch = session_epoch + 1 WHERE id = ?')
+    .run(hashPassword(password), userId);
 }
 
 export function nowIso() {

@@ -22,8 +22,10 @@ export async function fetchMatches(competition, from, to) {
   const url = `${API}/competitions/${competition}/matches?dateFrom=${ymd(from)}&dateTo=${ymd(to)}`;
   const res = await fetch(url, { headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY } });
   if (!res.ok) {
+    // The response body goes to the server log only; the error message is shown in the app's footer.
     const body = await res.text().catch(() => '');
-    throw new Error(`football-data.org ${res.status} for ${competition}: ${body.slice(0, 200)}`);
+    console.error(`[sync] football-data.org ${res.status} for ${competition}: ${body.slice(0, 200)}`);
+    throw new Error(`football-data.org answered ${res.status} for ${competition}`);
   }
   const json = await res.json();
   return json.matches ?? [];
