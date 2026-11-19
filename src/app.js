@@ -274,6 +274,19 @@ export function createApp() {
     res.redirect(`/matches/${match.id}`);
   });
 
+  app.post('/bets/:id/unsettle', (req, res) => {
+    const ctx = loadOwnBet(req, res);
+    if (!ctx) return;
+    const { bet, match } = ctx;
+    if (!bets.canUndoSettle(bet, match.status)) {
+      flash(req, 'err', 'Only "Other" bets you settled in the last 24 hours can be put back to pending.');
+      return res.redirect(`/matches/${match.id}`);
+    }
+    bets.unsettleOtherBet(bet);
+    flash(req, 'ok', 'Settlement undone — the bet is pending again.');
+    res.redirect(`/matches/${match.id}`);
+  });
+
   // ---------- Members ----------
   app.get('/members', (req, res) => {
     const users = getDb().prepare('SELECT id, display_name, username FROM users ORDER BY display_name').all();
@@ -330,6 +343,8 @@ function sameHost(url, host) {
 // ---------- Bet form parsing ----------
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const trimmed = (v) => String(v ?? '').trim();
+// Lines are shown with a typographic minus (U+2212); accept it, and other dashes, when pasted back.
+const lineText = (v) => trimmed(v).replace(/[\u2212\u2012\u2013\u2014\uFE63\uFF0D]/g, '-');
 
 export function parseBetForm(body) {
   const errors = [];
@@ -348,7 +363,7 @@ export function parseBetForm(body) {
       break;
     case 'AH': {
       if (!['HOME', 'AWAY'].includes(body.pick_ah)) errors.push('Pick the team for the handicap.');
-      const raw = trimmed(body.line_ah);
+      const raw = lineText(body.line_ah);
       const line = Number(raw);
       if (raw === '' || !isValidLine(line) || Math.abs(line) > 5) errors.push('Handicap line: a multiple of 0.25 between −5 and +5.');
       f.pick = body.pick_ah;
@@ -357,7 +372,7 @@ export function parseBetForm(body) {
     }
     case 'OU': {
       if (!['OVER', 'UNDER'].includes(body.pick_ou)) errors.push('Pick Over or Under.');
-      const raw = trimmed(body.line_ou);
+      const raw = lineText(body.line_ou);
       const line = Number(raw);
       if (raw === '' || !isValidLine(line) || line <= 0 || line > 10) errors.push('Goal line: a multiple of 0.25 between 0.25 and 10.');
       f.pick = body.pick_ou;

@@ -184,6 +184,28 @@ export function settleOtherBet(bet, result) {
   writeResult(bet, result);
 }
 
+/** How long the owner has to undo a hand settlement of an "Other" bet. */
+export const UNDO_SETTLE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the owner may still undo the hand settlement of this "Other" bet.
+ * Only bets on finished matches qualify: an "Other" bet voided because its match was
+ * postponed or cancelled was settled by the system, not by hand.
+ */
+export function canUndoSettle(bet, matchStatus = bet.match_status, now = Date.now()) {
+  if (bet.bet_type !== 'OTHER' || matchStatus !== 'FINISHED') return false;
+  if (!['WON', 'LOST', 'VOID'].includes(bet.result) || !bet.settled_at) return false;
+  const age = now - Date.parse(bet.settled_at);
+  return age >= 0 && age < UNDO_SETTLE_MS;
+}
+
+/** Owner undoes a hand settlement: the bet goes back to pending. */
+export function unsettleOtherBet(bet) {
+  getDb()
+    .prepare("UPDATE bets SET result = 'PENDING', profit_cents = NULL, settled_at = NULL WHERE id = ? AND bet_type = 'OTHER'")
+    .run(bet.id);
+}
+
 /**
  * Settle every pending bet on a match according to its status.
  * FINISHED -> auto-settle (OTHER bets wait for their owner); POSTPONED/CANCELLED/AWARDED -> VOID.

@@ -103,7 +103,12 @@ main.wrap { padding-top: 1rem; padding-bottom: 2rem; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; cursor: pointer; font-weight: 600; }
 .linkbtn:hover { text-decoration: underline; }
 .linkbtn.danger { color: var(--neg); }
-.settle .linkbtn { margin-left: .35rem; }
+.settle { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; padding-top: .5rem; border-top: 1px dashed var(--line); font-size: .85rem; }
+.settle-label { font-weight: 700; color: var(--ink); margin-right: auto; }
+.setbtn { min-width: 4.5rem; min-height: 2.5rem; padding: .4rem .9rem; border: 1px solid #b9c3d1; border-radius: var(--radius); background: #fff; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.setbtn:hover { background: #f4f8ff; }
+.setbtn-won { border-color: var(--pos); color: var(--pos); }
+.setbtn-lost { border-color: var(--neg); color: var(--neg); }
 
 /* Odds board */
 .board { margin-bottom: 1rem; }
@@ -186,7 +191,11 @@ input.tiny { width: 3.2rem; text-align: center; display: inline-block; }
 @media (max-width: 560px) {
   .nav { order: 3; flex-basis: 100%; }
   .me { margin-left: auto; }
-  .board-table th:nth-child(n+3):nth-child(-n+7), .board-table td:nth-child(n+3):nth-child(-n+7) { display: none; }
+  /* Matches board only: hide the per-type bet counts (columns 3–7). The members table keeps every column. */
+  .board-table:not(.members) th:nth-child(n+3):nth-child(-n+7), .board-table:not(.members) td:nth-child(n+3):nth-child(-n+7) { display: none; }
+  .board-table.members .c-total { width: auto; }
+  .settle-label { flex-basis: 100%; }
+  .setbtn { flex: 1; min-height: 2.75rem; }
   .mh-teams .team { font-size: 1rem; }
   .stats strong { font-size: 1.05rem; }
   input.short { width: 100%; margin: .3rem 0 0; }
