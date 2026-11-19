@@ -43,15 +43,19 @@
         <% } else { %>
           <a href="/bets/<%= bet.id %>/edit">Edit description</a>
         <% } %>
-        <% if (bet.bet_type === 'OTHER' && bet.result === 'PENDING' && finished) { %>
-          <form method="post" action="/bets/<%= bet.id %>/settle" class="settle">
-            Settle:
-            <button name="result" value="WON" class="linkbtn">Won</button>
-            <button name="result" value="LOST" class="linkbtn">Lost</button>
-            <button name="result" value="VOID" class="linkbtn">Void</button>
-          </form>
+        <% if (b.canUndoSettle(bet)) { %>
+          <form method="post" action="/bets/<%= bet.id %>/unsettle"><button class="linkbtn">Undo settle</button></form>
         <% } %>
       </span>
     <% } %>
   </div>
+  <% if (mine && bet.bet_type === 'OTHER' && bet.result === 'PENDING' && finished) { %>
+    <form method="post" action="/bets/<%= bet.id %>/settle" class="settle"
+          onsubmit="var r = event.submitter &amp;&amp; event.submitter.value; return confirm(r ? 'Mark this bet as ' + r.charAt(0) + r.slice(1).toLowerCase() + '? You can undo this for 24 hours.' : 'Settle this bet?')">
+      <span class="settle-label">Settle this bet:</span>
+      <button name="result" value="WON" class="setbtn setbtn-won">Won</button>
+      <button name="result" value="LOST" class="setbtn setbtn-lost">Lost</button>
+      <button name="result" value="VOID" class="setbtn">Void</button>
+    </form>
+  <% } %>
 </article>

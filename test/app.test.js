@@ -33,3 +33,13 @@ test('correct score needs a digit 0–9 on each side', () => {
 test('array values from repeated form fields do not crash parsing', () => {
   assert.equal(parseBetForm({ ...base, bet_type: 'OTHER', other_text: ['a', 'b'] }).errors.length, 0);
 });
+
+test('handicap and goal lines copied from the page (typographic minus) are accepted', () => {
+  const ah = parseBetForm({ ...base, bet_type: 'AH', pick_ah: 'AWAY', line_ah: '−1.5' });
+  assert.deepEqual([ah.errors, ah.fields.line], [[], -1.5]);
+  const dash = parseBetForm({ ...base, bet_type: 'AH', pick_ah: 'AWAY', line_ah: '–0.25' });
+  assert.deepEqual([dash.errors, dash.fields.line], [[], -0.25]);
+  const plus = parseBetForm({ ...base, bet_type: 'AH', pick_ah: 'HOME', line_ah: '+0.25' });
+  assert.deepEqual([plus.errors, plus.fields.line], [[], 0.25]);
+  assert.equal(parseBetForm({ ...base, bet_type: 'AH', pick_ah: 'HOME', line_ah: '−' }).errors.length, 1);
+});

@@ -2,13 +2,17 @@
   const v = (k) => form[k] ?? '';
   const sel = (k, val) => (form[k] === val ? 'selected' : '');
   const chk = (k, val) => (form[k] === val ? 'checked' : '');
+  // Handicap lines are picked from a list (a phone's decimal keypad often has no minus key).
+  const ahRaw = String(form.line_ah ?? '').trim().replace(/[−–]/g, '-');
+  const ahLines = [];
+  for (let q = -20; q <= 20; q++) ahLines.push(q / 4);
 %>
 <% if (errors.length) { %>
-  <div class="flash flash-err"><% errors.forEach(e => { %><div><%= e %></div><% }) %></div>
+  <div class="flash flash-err" role="alert"><% errors.forEach(e => { %><div><%= e %></div><% }) %></div>
 <% } %>
 <div class="field">
   <label for="bet_type">Bet type</label>
-  <select id="bet_type" name="bet_type">
+  <select id="bet_type" name="bet_type" required>
     <option value="1X2" <%= sel('bet_type', '1X2') %>>1X2 (win / draw / win)</option>
     <option value="AH" <%= sel('bet_type', 'AH') %>>Asian Handicap</option>
     <option value="OU" <%= sel('bet_type', 'OU') %>>Total Goals Over/Under</option>
@@ -19,45 +23,52 @@
 
 <fieldset class="field bt bt-1X2">
   <legend>Pick</legend>
-  <label class="chip"><input type="radio" name="pick_1x2" value="HOME" <%= chk('pick_1x2', 'HOME') %>> <%= match.home_team %></label>
+  <label class="chip"><input type="radio" name="pick_1x2" value="HOME" data-req <%= chk('pick_1x2', 'HOME') %>> <%= match.home_team %></label>
   <label class="chip"><input type="radio" name="pick_1x2" value="DRAW" <%= chk('pick_1x2', 'DRAW') %>> Draw</label>
   <label class="chip"><input type="radio" name="pick_1x2" value="AWAY" <%= chk('pick_1x2', 'AWAY') %>> <%= match.away_team %></label>
 </fieldset>
 
 <fieldset class="field bt bt-AH">
   <legend>Team and handicap</legend>
-  <label class="chip"><input type="radio" name="pick_ah" value="HOME" <%= chk('pick_ah', 'HOME') %>> <%= match.home_team %></label>
+  <label class="chip"><input type="radio" name="pick_ah" value="HOME" data-req <%= chk('pick_ah', 'HOME') %>> <%= match.home_team %></label>
   <label class="chip"><input type="radio" name="pick_ah" value="AWAY" <%= chk('pick_ah', 'AWAY') %>> <%= match.away_team %></label>
-  <input class="short" name="line_ah" inputmode="decimal" placeholder="e.g. -1.5 or +0.25" value="<%= v('line_ah') %>">
+  <select class="short" id="line_ah" name="line_ah" aria-label="Handicap line" data-req>
+    <option value="">Handicap line…</option>
+    <% ahLines.forEach(n => { %>
+      <option value="<%= n %>" <%= ahRaw !== '' && Number(ahRaw) === n ? 'selected' : '' %>><%= b.formatLine(n) %><%= n === 0 ? ' (level)' : '' %></option>
+    <% }) %>
+  </select>
 </fieldset>
 
 <fieldset class="field bt bt-OU">
   <legend>Over / Under total goals</legend>
-  <label class="chip"><input type="radio" name="pick_ou" value="OVER" <%= chk('pick_ou', 'OVER') %>> Over</label>
+  <label class="chip"><input type="radio" name="pick_ou" value="OVER" data-req <%= chk('pick_ou', 'OVER') %>> Over</label>
   <label class="chip"><input type="radio" name="pick_ou" value="UNDER" <%= chk('pick_ou', 'UNDER') %>> Under</label>
-  <input class="short" name="line_ou" inputmode="decimal" placeholder="e.g. 2.5 or 2.75" value="<%= v('line_ou') %>">
+  <input class="short" id="line_ou" name="line_ou" aria-label="Goal line" inputmode="decimal" maxlength="5"
+         pattern="\s*\d{1,2}(\.\d{1,2})?\s*" title="A goal line such as 2.5 or 2.75" data-req
+         placeholder="e.g. 2.5 or 2.75" value="<%= v('line_ou') %>">
 </fieldset>
 
 <fieldset class="field bt bt-CS">
   <legend>Score (90 minutes)</legend>
-  <span class="cs"><%= match.home_team %> <input class="tiny" name="cs_home" inputmode="numeric" value="<%= v('cs_home') %>">
-  – <input class="tiny" name="cs_away" inputmode="numeric" value="<%= v('cs_away') %>"> <%= match.away_team %></span>
+  <span class="cs"><%= match.home_team %> <input class="tiny" id="cs_home" name="cs_home" aria-label="<%= match.home_team %> goals (home)" inputmode="numeric" maxlength="1" pattern="\s*\d\s*" title="0 to 9" data-req value="<%= v('cs_home') %>">
+  – <input class="tiny" id="cs_away" name="cs_away" aria-label="<%= match.away_team %> goals (away)" inputmode="numeric" maxlength="1" pattern="\s*\d\s*" title="0 to 9" data-req value="<%= v('cs_away') %>"> <%= match.away_team %></span>
 </fieldset>
 
 <div class="field bt bt-OTHER">
   <label for="other_text">What's the bet?</label>
-  <input id="other_text" name="other_text" maxlength="100" placeholder="e.g. Saka to score anytime" value="<%= v('other_text') %>">
+  <input id="other_text" name="other_text" maxlength="100" data-req placeholder="e.g. Saka to score anytime" value="<%= v('other_text') %>">
   <small>You settle "Other" bets yourself after the match.</small>
 </div>
 
 <div class="row">
   <div class="field">
     <label for="odds">Odds</label>
-    <input id="odds" name="odds" inputmode="decimal" placeholder="2.10" value="<%= v('odds') %>">
+    <input id="odds" name="odds" inputmode="decimal" required maxlength="8" pattern="\s*\d+(\.\d{1,2})?\s*" title="Decimal odds above 1.00, e.g. 2.10" placeholder="2.10" value="<%= v('odds') %>">
   </div>
   <div class="field">
     <label for="stake">Stake (SGD)</label>
-    <input id="stake" name="stake" inputmode="decimal" placeholder="10.00" value="<%= v('stake') %>">
+    <input id="stake" name="stake" inputmode="decimal" required maxlength="10" pattern="\s*\$?\d+(\.\d{1,2})?\s*" title="Amount in SGD, e.g. 10.00" placeholder="10.00" value="<%= v('stake') %>">
   </div>
 </div>
 <div class="field">
@@ -67,9 +78,16 @@
 <script>
   (function () {
     var s = document.getElementById('bet_type');
+    // Only the chosen bet type's inputs are required; hidden ones are disabled so the
+    // browser does not validate (or submit) inputs the user cannot see.
     function show() {
       document.querySelectorAll('.bt').forEach(function (el) {
-        el.hidden = !el.classList.contains('bt-' + s.value);
+        var hide = !el.classList.contains('bt-' + s.value);
+        el.hidden = hide;
+        el.querySelectorAll('input, select').forEach(function (c) {
+          c.disabled = hide;
+          if (c.hasAttribute('data-req')) c.required = !hide;
+        });
       });
     }
     s.addEventListener('change', show);
