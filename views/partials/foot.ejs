@@ -2,7 +2,7 @@
 <footer class="footer">
   <div class="wrap">
     <p class="sync">
-      <% if (syncInfo.error) { %>
+      <% if (user && syncInfo.error) { %>
         <span class="warn">Match data not refreshing: <%= syncInfo.error %></span> ·
       <% } %>
       Match data last updated <%= fmt.ago(syncInfo.ok) %>.

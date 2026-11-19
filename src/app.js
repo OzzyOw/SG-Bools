@@ -3,14 +3,26 @@ import express from 'express';
 import session from 'express-session';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getDb, getMeta, nowIso } from './db.js';
+import { getDb, getMeta, nowIso, setPassword } from './db.js';
+import { hashPassword, verifyPassword, createLimiter, configErrors, registrationOpen, MIN_PASSWORD_LENGTH } from './auth.js';
 import { isValidLine } from './settle.js';
 import * as bets from './bets.js';
 import * as fmt from './format.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const MINUTE = 60 * 1000;
+const SESSION_MAX_AGE = 30 * 24 * 60 * MINUTE; // logged out after 30 days without a visit
 
 export function createApp() {
+  const problems = configErrors();
+  if (problems.length) throw new Error(problems.join('\n'));
+
+  // Failed-attempt limits (in memory, reset on restart).
+  const loginLimiter = createLimiter({ max: 10, windowMs: 15 * MINUTE }); // per IP
+  const inviteLimiter = createLimiter({ max: 10, windowMs: 15 * MINUTE }); // per IP
+  const passwordLimiter = createLimiter({ max: 5, windowMs: 15 * MINUTE }); // per member, on /account
+  const tooMany = (ms) => `Too many attempts. Try again in ${Math.ceil(ms / MINUTE)} minute${ms > MINUTE ? 's' : ''}.`;
+
   const app = express();
   app.set('views', path.join(root, 'views'));
   app.set('view engine', 'ejs');
@@ -18,10 +30,11 @@ export function createApp() {
   app.use(express.static(path.join(root, 'public')));
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || 'sg-bools-demo',
+      secret: process.env.SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
-      cookie: { httpOnly: true, sameSite: 'lax' },
+      rolling: true, // each visit restarts the 30 days
+      cookie: { httpOnly: true, sameSite: 'lax', maxAge: SESSION_MAX_AGE },
     })
   );
 
@@ -38,10 +51,16 @@ export function createApp() {
   // Shared view locals.
   app.use((req, res, next) => {
     const db = getDb();
-    res.locals.user = req.session.userId
-      ? db.prepare('SELECT id, username, display_name FROM users WHERE id = ?').get(req.session.userId)
+    let user = req.session.userId
+      ? db.prepare('SELECT id, username, display_name, session_epoch FROM users WHERE id = ?').get(req.session.userId)
       : null;
-    if (req.session.userId && !res.locals.user) delete req.session.userId; // user wiped by a reseed
+    // Gone (deleted, reseeded) or password changed since this session signed in: treat as logged out.
+    if (user && user.session_epoch !== req.session.epoch) user = null;
+    if (req.session.userId && !user) {
+      delete req.session.userId;
+      delete req.session.epoch;
+    }
+    res.locals.user = user;
     res.locals.flash = req.session.flash ?? null;
     delete req.session.flash;
     res.locals.fmt = fmt;
@@ -57,9 +76,11 @@ export function createApp() {
 
   // Start a fresh session for the newly signed-in user (prevents session fixation).
   const signIn = (req, userId, done) => {
+    const { session_epoch: epoch } = getDb().prepare('SELECT session_epoch FROM users WHERE id = ?').get(userId);
     req.session.regenerate((err) => {
       if (err) return done(err);
       req.session.userId = userId;
+      req.session.epoch = epoch;
       done();
     });
   };
@@ -75,8 +96,11 @@ export function createApp() {
   app.post('/login', (req, res, next) => {
     const username = String(req.body.username ?? '');
     const password = String(req.body.password ?? '');
-    const u = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
-    if (!u || u.password !== password) {
+    const wait = loginLimiter.blockedFor(req.ip);
+    if (wait) return res.status(429).render('login', { error: tooMany(wait), username, next: req.body.next });
+    const u = getDb().prepare('SELECT id, password FROM users WHERE username = ?').get(username.trim());
+    if (!verifyPassword(password, u?.password ?? null)) {
+      loginLimiter.fail(req.ip);
       return res.status(401).render('login', { error: 'Wrong username or password.', username, next: req.body.next });
     }
     signIn(req, u.id, (err) => (err ? next(err) : res.redirect(safeNext(req.body.next))));
@@ -84,25 +108,37 @@ export function createApp() {
 
   app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/login')));
 
-  app.get('/register', (req, res) => res.render('register', { error: null, form: {} }));
+  app.get('/register', (req, res) => res.render('register', { error: null, form: {}, open: registrationOpen() }));
 
   app.post('/register', (req, res, next) => {
     const form = {
-      invite: (req.body.invite ?? '').trim(),
-      username: (req.body.username ?? '').trim(),
-      display_name: (req.body.display_name ?? '').trim(),
+      invite: String(req.body.invite ?? '').trim(),
+      username: String(req.body.username ?? '').trim(),
+      display_name: String(req.body.display_name ?? '').trim(),
       password: req.body.password ?? '',
     };
-    const fail = (error) => res.status(400).render('register', { error, form });
-    if (!process.env.INVITE_CODE || form.invite !== process.env.INVITE_CODE) return fail('That invite code is not right.');
+    const fail = (error, status = 400) => res.status(status).render('register', { error, form, open: true });
+    if (!registrationOpen()) return res.status(403).render('register', { error: null, form: {}, open: false });
+    const wait = inviteLimiter.blockedFor(req.ip);
+    if (wait) return fail(tooMany(wait), 429);
+    if (form.invite !== process.env.INVITE_CODE.trim()) {
+      inviteLimiter.fail(req.ip);
+      return fail('That invite code is not right.');
+    }
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(form.username)) return fail('Username: 3–20 letters, numbers or _.');
     if (form.display_name.length < 1 || form.display_name.length > 20) return fail('Display name: 1–20 characters.');
-    if (form.password.length < 4) return fail('Password: at least 4 characters.');
+    if (typeof form.password !== 'string' || form.password.length < MIN_PASSWORD_LENGTH) {
+      return fail(`Password: at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
     const db = getDb();
     if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(form.username)) return fail('That username is taken.');
+    // Display names label every bet, so two members can't share one.
+    if (db.prepare('SELECT 1 FROM users WHERE display_name = ? COLLATE NOCASE').get(form.display_name)) {
+      return fail('That display name is taken — pick another.');
+    }
     const info = db
       .prepare('INSERT INTO users (username, display_name, password, created_at) VALUES (?, ?, ?, ?)')
-      .run(form.username, form.display_name, form.password, nowIso());
+      .run(form.username, form.display_name, hashPassword(form.password), nowIso());
     signIn(req, Number(info.lastInsertRowid), (err) => {
       if (err) return next(err);
       flash(req, 'ok', `Welcome to SG Bools, ${form.display_name}!`);
@@ -290,16 +326,49 @@ export function createApp() {
   });
 
   // ---------- Account ----------
-  app.get('/account', (req, res) => res.render('account', { error: null }));
+  const renderAccount = (res, status = 200, errors = {}) =>
+    res.status(status).render('account', { error: null, deleteError: null, ...errors });
 
-  app.post('/account/password', (req, res) => {
-    const { current = '', next = '' } = req.body;
-    const u = getDb().prepare('SELECT password FROM users WHERE id = ?').get(res.locals.user.id);
-    if (u.password !== current) return res.status(400).render('account', { error: 'Current password is wrong.' });
-    if (next.length < 4) return res.status(400).render('account', { error: 'New password: at least 4 characters.' });
-    getDb().prepare('UPDATE users SET password = ? WHERE id = ?').run(next, res.locals.user.id);
-    flash(req, 'ok', 'Password changed.');
-    res.redirect('/account');
+  /** Check the member's current password (limited per member). Returns an error message or null. */
+  const checkCurrentPassword = (res, password) => {
+    const key = res.locals.user.id;
+    const wait = passwordLimiter.blockedFor(key);
+    if (wait) return tooMany(wait);
+    const u = getDb().prepare('SELECT password FROM users WHERE id = ?').get(key);
+    if (!verifyPassword(String(password ?? ''), u.password)) {
+      passwordLimiter.fail(key);
+      return 'Current password is wrong.';
+    }
+    return null;
+  };
+
+  app.get('/account', (req, res) => renderAccount(res));
+
+  app.post('/account/password', (req, res, next) => {
+    const newPassword = req.body.next;
+    const error = checkCurrentPassword(res, req.body.current);
+    if (error) return renderAccount(res, 400, { error });
+    if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
+      return renderAccount(res, 400, { error: `New password: at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+    const userId = res.locals.user.id;
+    setPassword(userId, newPassword); // also signs out every other device
+    signIn(req, userId, (err) => {
+      if (err) return next(err);
+      flash(req, 'ok', 'Password changed. Any other devices are now logged out.');
+      res.redirect('/account');
+    });
+  });
+
+  app.post('/account/delete', (req, res, next) => {
+    const deleteError = checkCurrentPassword(res, req.body.current);
+    if (deleteError) return renderAccount(res, 400, { deleteError });
+    getDb().prepare('DELETE FROM users WHERE id = ?').run(res.locals.user.id); // bets go with it (ON DELETE CASCADE)
+    req.session.regenerate((err) => {
+      if (err) return next(err);
+      flash(req, 'ok', 'Your account and all your bets have been deleted.');
+      res.redirect('/login');
+    });
   });
 
   app.use((req, res) => res.status(404).render('error', { message: 'Page not found.' }));

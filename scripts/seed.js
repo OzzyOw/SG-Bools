@@ -1,20 +1,24 @@
 // Wipe the database at DB_PATH and fill it with demo data built on REAL matches.
-//   npm run seed
+//   npm run seed              members get random passwords, printed once at the end
+//   npm run seed:demo         members get the simple published demo passwords (this computer only!)
 // Needs FOOTBALL_DATA_API_KEY in .env (stops before touching anything if it's missing).
 import { getDb, tx, nowIso, setMeta } from '../src/db.js';
+import { hashPassword, randomPassword } from '../src/auth.js';
 import { fetchMatches, upsertMatches, ninetyMinuteScore, COMPETITIONS, hasApiKey } from '../src/footballData.js';
 import { createBet, settleMatch, settleOtherBet } from '../src/bets.js';
 import { rnd, rint, pick, weighted, randomSelection, makeBet, addPendingBets } from './demo-bets.js';
 
-// Demo members — passwords are deliberately simple (and stored in plain text: demo only).
-export const MEMBERS = [
-  { username: 'mum', display_name: 'Mum', password: 'mum123' },
-  { username: 'dad', display_name: 'Dad', password: 'dad123' },
-  { username: 'bro', display_name: 'Bro', password: 'bro123' },
-  { username: 'sis', display_name: 'Sis', password: 'sis123' },
-  { username: 'cousin', display_name: 'Cousin', password: 'cousin123' },
-  { username: 'me', display_name: 'Me', password: 'me123' },
-];
+const DEMO = process.argv.includes('--demo');
+
+// Demo members. The simple passwords are public (README), so they are only used with --demo.
+const MEMBERS = [
+  { username: 'mum', display_name: 'Mum', demoPassword: 'mum123' },
+  { username: 'dad', display_name: 'Dad', demoPassword: 'dad123' },
+  { username: 'bro', display_name: 'Bro', demoPassword: 'bro123' },
+  { username: 'sis', display_name: 'Sis', demoPassword: 'sis123' },
+  { username: 'cousin', display_name: 'Cousin', demoPassword: 'cousin123' },
+  { username: 'me', display_name: 'Me', demoPassword: 'me123' },
+].map(({ demoPassword, ...m }) => ({ ...m, password: DEMO ? demoPassword : randomPassword() }));
 const PENDING_PER_MEMBER = 7; // ~40 pending bets on real upcoming matches
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -50,11 +54,12 @@ tx(() => {
 upsertMatches(apiMatches); // no bets yet, so nothing settles here
 setMeta('last_upcoming_sync', nowIso());
 setMeta('last_sync_ok', nowIso());
+if (DEMO) setMeta('demo_logins', '1'); // server warns if these are exposed to the network
 
 const users = MEMBERS.map((m) => {
   const info = db
     .prepare('INSERT INTO users (username, display_name, password, created_at) VALUES (?, ?, ?, ?)')
-    .run(m.username, m.display_name, m.password, new Date(now - 45 * DAY).toISOString());
+    .run(m.username, m.display_name, hashPassword(m.password), new Date(now - 45 * DAY).toISOString());
   return { ...m, id: Number(info.lastInsertRowid) };
 });
 
@@ -113,5 +118,10 @@ try {
 
 console.log(`\nSeeded ${users.length} members, ${apiMatches.length} matches (${finished.length} finished in the last 30 days).`);
 console.log(`Bets: ${settledCount} settled, ${pendingCount} pending.`);
-console.log('\nDemo logins (username / password):');
+if (DEMO) {
+  console.log('\nDemo logins (username / password) — these are published in the README, so keep HOST unset');
+  console.log('(this computer only) while they exist:');
+} else {
+  console.log('\nLogins (username / password). Shown only now and stored hashed, so note them down:');
+}
 for (const m of MEMBERS) console.log(`  ${m.username.padEnd(7)} / ${m.password}`);

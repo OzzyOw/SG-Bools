@@ -1,5 +1,5 @@
 // Record a ~1 minute guided demo video of SG Bools.
-//   1. npm start            (app must be running)
+//   1. npm run seed:demo, then npm start   (app must be running with the demo logins)
 //   2. npm run demo:record  -> demo/sg-bools-demo.webm
 // Uses the installed Microsoft Edge via Playwright. Logs in as "Me", posts a bet that duplicates
 // someone else's, edits it, then deletes it again, so the database ends up as it started.
@@ -17,7 +17,7 @@ const OUT = path.join(OUT_DIR, 'sg-bools-demo.webm');
 // ---------- pick a match whose bet "Me" can duplicate on camera ----------
 const db = getDb();
 const me = db.prepare("SELECT id FROM users WHERE username = 'me'").get();
-if (!me) throw new Error('Demo user "me" not found — run npm run seed first.');
+if (!me) throw new Error('Demo user "me" not found — run npm run seed:demo first.');
 const target = db
   .prepare(
     `SELECT b.*, u.display_name, m.home_team, m.away_team
@@ -198,7 +198,7 @@ await hideCard();
 // 1. Login
 await caption(s(1, 'Sign in'), 'Every member has their own account. New members join with the family invite code.');
 await type(page.locator('#username'), 'me');
-await type(page.locator('#password'), 'me123');
+await type(page.locator('#password'), process.env.DEMO_PASSWORD || 'me123'); // seed:demo password
 await click(page.getByRole('button', { name: 'Log in' }));
 await wait(400);
 

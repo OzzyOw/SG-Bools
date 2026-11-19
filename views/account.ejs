@@ -6,8 +6,17 @@
   <% if (error) { %><div class="flash flash-err"><%= error %></div><% } %>
   <form method="post" action="/account/password">
     <div class="field"><label for="current">Current password</label><input id="current" name="current" type="password" autocomplete="current-password"></div>
-    <div class="field"><label for="next">New password</label><input id="next" name="next" type="password" autocomplete="new-password"></div>
+    <div class="field"><label for="next">New password <small>(at least 8 characters)</small></label><input id="next" name="next" type="password" autocomplete="new-password" minlength="8"></div>
     <button class="btn">Change password</button>
+  </form>
+  <p class="muted">Changing your password logs you out on every other phone or computer.</p>
+
+  <h2>Delete my account</h2>
+  <p>This permanently removes your account and every bet you have posted, including your win/loss record. It cannot be undone.</p>
+  <% if (deleteError) { %><div class="flash flash-err"><%= deleteError %></div><% } %>
+  <form method="post" action="/account/delete">
+    <div class="field"><label for="delete-current">Type your password to confirm</label><input id="delete-current" name="current" type="password" autocomplete="current-password"></div>
+    <button class="btn">Delete my account and bets</button>
   </form>
 </section>
 <%- include('partials/foot') %>

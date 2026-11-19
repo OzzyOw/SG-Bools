@@ -22,17 +22,35 @@ Needs **Node 22.13+** (built and tested on Node 26). No database server — SQLi
 
 ```
 npm install
-copy .env.example .env      # then put your football-data.org key in .env
+copy .env.example .env      # then fill in .env (see below)
 npm run seed                 # demo members, ~140 settled bets (last 30 days) + ~40 pending bets
 npm start                    # http://localhost:3000
 ```
 
-Get a free API key at <https://www.football-data.org/client/register> (email only, no card).
-Keep it in `.env` — football-data.org's terms forbid committing it.
+In `.env`, set:
 
-`npm start` also prints a `same Wi-Fi` address; phones on your home network can open that.
+- `FOOTBALL_DATA_API_KEY` — get a free key at <https://www.football-data.org/client/register>
+  (email only, no card). Keep it in `.env`: football-data.org's terms forbid committing it.
+- `SESSION_SECRET` — a long random string. The server **won't start** while it is missing or
+  `change-me`. Generate one with
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+- `INVITE_CODE` — your group's own code. `/register` stays **off** until it's set (the old
+  example `bools2026` counts as unset).
 
-### Demo logins
+### Phones on the same Wi-Fi
+
+By default the app only accepts connections from this computer. To let phones on your home
+network in, add `HOST=0.0.0.0` to `.env`; `npm start` then prints a `same Wi-Fi` address.
+Traffic is plain HTTP, so passwords and the login cookie cross the Wi-Fi unencrypted — only do
+this on a network you trust, and never with the demo logins below.
+
+### Logins
+
+`npm run seed` gives each demo member (`mum`, `dad`, `bro`, `sis`, `cousin`, `me`) a random
+password and prints them **once** at the end; they're stored hashed, so note them down.
+
+`npm run seed:demo` instead uses simple published passwords, for screenshots and
+`npm run demo:record` on this computer only (the server warns if you expose them with `HOST`):
 
 | Username | Password |
 |---|---|
@@ -43,26 +61,30 @@ Keep it in `.env` — football-data.org's terms forbid committing it.
 | cousin | cousin123 |
 | me | me123 |
 
-New members register at `/register` with the invite code from `.env` (`INVITE_CODE`, default `bools2026`).
+New members register at `/register` with the invite code from `.env`. Passwords need at least
+8 characters and display names must be unique.
 
 ### Scripts
 
 | Command | What it does |
 |---|---|
 | `npm start` | Run the app (plus background match refresh) |
-| `npm run seed` | **Wipes** the database at `DB_PATH` and fills it with demo data. Stops without changing anything if the API key is missing. |
+| `npm run seed` | **Wipes** the database at `DB_PATH` and fills it with demo data; members get random passwords, printed once. Stops without changing anything if the API key is missing. |
+| `npm run seed:demo` | Same, but with the simple published demo passwords (this computer only) |
 | `npm run add-pending -- <n>` | Add `n` pending demo bets per member (default 5) on open upcoming matches, without wiping anything |
-| `npm run demo:record` | With the app running, records a ~1 min captioned demo with click sounds to `demo/sg-bools-demo.webm` (uses installed Microsoft Edge; leaves the data as it found it) |
-| `npm test` | Settlement / money / sync tests (Node's built-in test runner) |
-| `npm run reset-password -- <username> <new-password>` | Reset a forgotten password |
+| `npm run demo:record` | With the app running on `seed:demo` data, records a ~1 min captioned demo with click sounds to `demo/sg-bools-demo.webm` (uses installed Microsoft Edge; leaves the data as it found it) |
+| `npm test` | Settlement / money / sync / security tests (Node's built-in test runner) |
+| `npm run reset-password -- <username>` | Reset a forgotten password (asks for the new one at a hidden prompt; logs that member out everywhere) |
+| `npm run remove-member -- <username>` | Permanently delete a member who has left, with all their bets (asks you to confirm) |
 
 ### `.env` settings
 
 | Key | Purpose |
 |---|---|
 | `FOOTBALL_DATA_API_KEY` | football-data.org key |
-| `INVITE_CODE` | Code needed to register |
-| `SESSION_SECRET` | Signs the login cookie |
+| `INVITE_CODE` | Code needed to register (registration is off until set) |
+| `SESSION_SECRET` | Signs the login cookie (required; long and random) |
+| `HOST` | Unset = this computer only; `0.0.0.0` = also phones on the same network |
 | `DB_PATH` | SQLite file (default `data/sgbools.db`) |
 | `PORT` | Default 3000 |
 
@@ -90,6 +112,7 @@ New members register at `/register` with the invite code from `.env` (`INVITE_CO
 ```
 src/server.js        start server + scheduler
 src/app.js           routes, login, bet form validation
+src/auth.js          password hashing, attempt limits, config checks
 src/bets.js          bet queries, grouping, settlement against the DB
 src/settle.js        pure settlement + money maths
 src/footballData.js  football-data.org client + sync
@@ -98,13 +121,26 @@ src/format.js        SGT dates, money formatting
 views/               EJS pages
 public/style.css     styling
 scripts/seed.js      demo data
+scripts/*.js         reset-password, remove-member and other admin scripts
 test/                node:test tests
 ```
 
-## Known demo shortcuts (deliberate — this is a local proof of concept)
+## Security and privacy
 
-- **Passwords are stored in plain text.** Don't reuse a real password here.
-- No CSRF protection, no login rate limiting; sessions live in memory, so restarting the server
-  logs everyone out.
+- **Passwords** are hashed with scrypt and a random salt per member (`src/auth.js`); databases
+  from older versions are converted on startup.
+- **Logins** are limited to 10 wrong attempts per device per 15 minutes; wrong invite codes and
+  wrong current passwords on the Account page are limited too. The limits live in memory.
+- **Sessions** last 30 days from the last visit. Changing or resetting a password logs that
+  member out on every other device. Cross-site form posts are rejected (Origin/Referer check)
+  and the cookie is `HttpOnly` + `SameSite=Lax`.
+- **Leaving:** members can delete their own account and all their bets from the Account page;
+  `npm run remove-member` does the same for someone who has left.
+- Sync error details are shown only to logged-in members, and never include the API's response.
+
+### Still deliberate shortcuts (local proof of concept)
+
+- Plain HTTP, no TLS: keep it on a trusted home network.
+- Sessions live in memory, so restarting the server logs everyone out.
 - No email — forgotten passwords are reset with the script above.
 - Odds aren't available on the free API, so members type them in.
