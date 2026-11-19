@@ -21,8 +21,19 @@ export function createApp() {
       secret: process.env.SESSION_SECRET || 'sg-bools-demo',
       resave: false,
       saveUninitialized: false,
+      cookie: { httpOnly: true, sameSite: 'lax' },
     })
   );
+
+  // CSRF: reject state-changing requests that a browser says came from another site.
+  app.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return next();
+    const source = req.get('origin') ?? req.get('referer');
+    if (source && !sameHost(source, req.get('host'))) {
+      return res.status(403).type('text').send('Cross-site request blocked.');
+    }
+    next();
+  });
 
   // Shared view locals.
   app.use((req, res, next) => {
@@ -44,6 +55,15 @@ export function createApp() {
     req.session.flash = { type, text };
   };
 
+  // Start a fresh session for the newly signed-in user (prevents session fixation).
+  const signIn = (req, userId, done) => {
+    req.session.regenerate((err) => {
+      if (err) return done(err);
+      req.session.userId = userId;
+      done();
+    });
+  };
+
   const requireLogin = (req, res, next) => {
     if (!res.locals.user) return res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
     next();
@@ -52,22 +72,21 @@ export function createApp() {
   // ---------- Auth ----------
   app.get('/login', (req, res) => res.render('login', { error: null, username: '', next: req.query.next ?? '/' }));
 
-  app.post('/login', (req, res) => {
-    const { username = '', password = '' } = req.body;
+  app.post('/login', (req, res, next) => {
+    const username = String(req.body.username ?? '');
+    const password = String(req.body.password ?? '');
     const u = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
     if (!u || u.password !== password) {
       return res.status(401).render('login', { error: 'Wrong username or password.', username, next: req.body.next });
     }
-    req.session.userId = u.id;
-    const next = typeof req.body.next === 'string' && req.body.next.startsWith('/') ? req.body.next : '/';
-    res.redirect(next);
+    signIn(req, u.id, (err) => (err ? next(err) : res.redirect(safeNext(req.body.next))));
   });
 
   app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/login')));
 
   app.get('/register', (req, res) => res.render('register', { error: null, form: {} }));
 
-  app.post('/register', (req, res) => {
+  app.post('/register', (req, res, next) => {
     const form = {
       invite: (req.body.invite ?? '').trim(),
       username: (req.body.username ?? '').trim(),
@@ -84,9 +103,11 @@ export function createApp() {
     const info = db
       .prepare('INSERT INTO users (username, display_name, password, created_at) VALUES (?, ?, ?, ?)')
       .run(form.username, form.display_name, form.password, nowIso());
-    req.session.userId = Number(info.lastInsertRowid);
-    flash(req, 'ok', `Welcome to SG Bools, ${form.display_name}!`);
-    res.redirect('/');
+    signIn(req, Number(info.lastInsertRowid), (err) => {
+      if (err) return next(err);
+      flash(req, 'ok', `Welcome to SG Bools, ${form.display_name}!`);
+      res.redirect('/');
+    });
   });
 
   app.use(requireLogin);
@@ -107,14 +128,16 @@ export function createApp() {
     const matches = db
       .prepare(
         `SELECT m.*,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id) AS bet_total,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id AND bet_type = '1X2') AS n_1x2,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id AND bet_type = 'AH') AS n_ah,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id AND bet_type = 'OU') AS n_ou,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id AND bet_type = 'CS') AS n_cs,
-           (SELECT COUNT(*) FROM bets WHERE match_id = m.id AND bet_type = 'OTHER') AS n_other
+           COUNT(b.id) AS bet_total,
+           COUNT(CASE WHEN b.bet_type = '1X2' THEN 1 END) AS n_1x2,
+           COUNT(CASE WHEN b.bet_type = 'AH' THEN 1 END) AS n_ah,
+           COUNT(CASE WHEN b.bet_type = 'OU' THEN 1 END) AS n_ou,
+           COUNT(CASE WHEN b.bet_type = 'CS' THEN 1 END) AS n_cs,
+           COUNT(CASE WHEN b.bet_type = 'OTHER' THEN 1 END) AS n_other
          FROM matches m
+         LEFT JOIN bets b ON b.match_id = m.id
          WHERE m.kickoff_utc > ? AND m.kickoff_utc <= ?
+         GROUP BY m.id
          ORDER BY m.kickoff_utc, m.competition, m.home_team`
       )
       .all(now, until);
@@ -210,7 +233,7 @@ export function createApp() {
     const { bet, match, open } = ctx;
     if (!open) {
       // After kickoff only the description may change.
-      const description = (req.body.description ?? '').trim();
+      const description = trimmed(req.body.description);
       if (description.length > 500) {
         return res.status(400).render('edit', { ...ctx, form: { ...betToForm(bet), description }, errors: ['Description: 500 characters max.'] });
       }
@@ -288,8 +311,25 @@ export function createApp() {
   return app;
 }
 
+// ---------- Request helpers ----------
+
+/** Only allow same-site paths: "/x" but not "//host", "/\host" or anything with a backslash. */
+export function safeNext(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+  return value;
+}
+
+function sameHost(url, host) {
+  try {
+    return new URL(url).host === host;
+  } catch {
+    return false; // e.g. Origin: null
+  }
+}
+
 // ---------- Bet form parsing ----------
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
+const trimmed = (v) => String(v ?? '').trim();
 
 export function parseBetForm(body) {
   const errors = [];
@@ -308,31 +348,35 @@ export function parseBetForm(body) {
       break;
     case 'AH': {
       if (!['HOME', 'AWAY'].includes(body.pick_ah)) errors.push('Pick the team for the handicap.');
-      const line = Number(body.line_ah);
-      if (body.line_ah === '' || !isValidLine(line) || Math.abs(line) > 5) errors.push('Handicap line: a multiple of 0.25 between −5 and +5.');
+      const raw = trimmed(body.line_ah);
+      const line = Number(raw);
+      if (raw === '' || !isValidLine(line) || Math.abs(line) > 5) errors.push('Handicap line: a multiple of 0.25 between −5 and +5.');
       f.pick = body.pick_ah;
       f.line = line;
       break;
     }
     case 'OU': {
       if (!['OVER', 'UNDER'].includes(body.pick_ou)) errors.push('Pick Over or Under.');
-      const line = Number(body.line_ou);
-      if (body.line_ou === '' || !isValidLine(line) || line <= 0 || line > 10) errors.push('Goal line: a multiple of 0.25 between 0.25 and 10.');
+      const raw = trimmed(body.line_ou);
+      const line = Number(raw);
+      if (raw === '' || !isValidLine(line) || line <= 0 || line > 10) errors.push('Goal line: a multiple of 0.25 between 0.25 and 10.');
       f.pick = body.pick_ou;
       f.line = line;
       break;
     }
     case 'CS': {
-      const h = Number(body.cs_home);
-      const a = Number(body.cs_away);
-      const ok = (n, raw) => raw !== '' && Number.isInteger(n) && n >= 0 && n <= 9;
-      if (!ok(h, body.cs_home) || !ok(a, body.cs_away)) errors.push('Correct score: each side 0–9.');
+      const hRaw = trimmed(body.cs_home);
+      const aRaw = trimmed(body.cs_away);
+      const h = Number(hRaw);
+      const a = Number(aRaw);
+      const ok = (raw) => /^\d$/.test(raw);
+      if (!ok(hRaw) || !ok(aRaw)) errors.push('Correct score: each side 0–9.');
       f.cs_home = h;
       f.cs_away = a;
       break;
     }
     case 'OTHER': {
-      const t = (body.other_text ?? '').trim();
+      const t = trimmed(body.other_text);
       if (t.length < 1 || t.length > 100) errors.push('Describe the "Other" bet in 1–100 characters.');
       f.other_text = t;
       break;
@@ -341,15 +385,15 @@ export function parseBetForm(body) {
       errors.push('Choose a bet type.');
   }
 
-  const oddsRaw = String(body.odds ?? '').trim();
+  const oddsRaw = trimmed(body.odds);
   if (!MONEY_RE.test(oddsRaw) || Number(oddsRaw) <= 1) errors.push('Odds must be above 1.00 (up to 2 decimals).');
   f.odds_100 = Math.round(Number(oddsRaw) * 100);
 
-  const stakeRaw = String(body.stake ?? '').trim().replace(/^\$/, '');
+  const stakeRaw = trimmed(body.stake).replace(/^\$/, '');
   if (!MONEY_RE.test(stakeRaw) || Number(stakeRaw) <= 0) errors.push('Stake must be above $0 (up to 2 decimals).');
   f.stake_cents = Math.round(Number(stakeRaw) * 100);
 
-  const desc = (body.description ?? '').trim();
+  const desc = trimmed(body.description);
   if (desc.length > 500) errors.push('Description: 500 characters max.');
   f.description = desc || null;
 

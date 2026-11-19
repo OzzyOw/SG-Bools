@@ -1,6 +1,6 @@
 // Bet and record queries, plus display helpers.
 import { getDb, nowIso, tx } from './db.js';
-import { resultFor, profitCents, summarise } from './settle.js';
+import { resultFor, profitCents } from './settle.js';
 
 export const OPEN_STATUSES = ['SCHEDULED', 'TIMED'];
 export const SETTLE_STATUSES = ['FINISHED'];
@@ -47,16 +47,23 @@ export function feed(tab, page, perPage = 20) {
   return { rows, total, pages: Math.max(1, Math.ceil(total / perPage)) };
 }
 
-/** W/L record for every user, keyed by user id. */
+/** W/L record for every user, keyed by user id. Same rules as settle.summarise, done in SQL. */
 export function allRecords() {
-  const rows = getDb().prepare('SELECT user_id, result, profit_cents FROM bets').all();
-  const byUser = new Map();
-  for (const r of rows) {
-    if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
-    byUser.get(r.user_id).push(r);
-  }
+  const rows = getDb()
+    .prepare(
+      `SELECT u.id,
+         COUNT(b.id) AS total,
+         COUNT(CASE WHEN b.result IN ('WON', 'HALF_WON') THEN 1 END) AS wins,
+         COUNT(CASE WHEN b.result IN ('LOST', 'HALF_LOST') THEN 1 END) AS losses,
+         COUNT(CASE WHEN b.result = 'PENDING' THEN 1 END) AS pending,
+         COALESCE(SUM(b.profit_cents), 0) AS netCents
+       FROM users u
+       LEFT JOIN bets b ON b.user_id = u.id
+       GROUP BY u.id`
+    )
+    .all();
   const out = {};
-  for (const u of getDb().prepare('SELECT id FROM users').all()) out[u.id] = summarise(byUser.get(u.id) ?? []);
+  for (const { id, ...rec } of rows) out[id] = rec;
   return out;
 }
 
@@ -86,9 +93,13 @@ export function groupBets(bets, match) {
   const typeOrder = { '1X2': 0, AH: 1, OU: 2, CS: 3, OTHER: 4 };
   return [...groups.values()]
     .map((g) => {
-      const counts = new Map();
-      for (const b of g.bets) counts.set(b.display_name, (counts.get(b.display_name) ?? 0) + 1);
-      return { ...g, people: [...counts].map(([name, count]) => ({ name, count })) };
+      const people = new Map(); // keyed by user id: display names are not unique
+      for (const b of g.bets) {
+        const p = people.get(b.user_id) ?? { name: b.display_name, count: 0 };
+        p.count++;
+        people.set(b.user_id, p);
+      }
+      return { ...g, people: [...people.values()] };
     })
     .sort((a, b) => b.bets.length - a.bets.length || typeOrder[a.type] - typeOrder[b.type]);
 }
@@ -194,6 +205,20 @@ export function settleMatch(match) {
     }
   });
   return n;
+}
+
+/**
+ * A postponed match that comes back with a new kickoff is open again: bets voided by the
+ * postponement go back to pending so they settle on the rescheduled game.
+ * (Owners only settle "Other" bets on FINISHED matches, so any VOID here came from a postponement.)
+ * Returns the number of bets reopened.
+ */
+export function reopenVoidedBets(match) {
+  if (!OPEN_STATUSES.includes(match.status)) return 0;
+  const info = getDb()
+    .prepare("UPDATE bets SET result = 'PENDING', profit_cents = NULL, settled_at = NULL WHERE match_id = ? AND result = 'VOID'")
+    .run(match.id);
+  return Number(info.changes);
 }
 
 export const RESULT_LABELS = {

@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 
 process.env.DB_PATH = ':memory:';
 const { getDb } = await import('../src/db.js');
-const { upsertMatches, ninetyMinuteScore } = await import('../src/footballData.js');
-const { createBet } = await import('../src/bets.js');
+const { upsertMatches, ninetyMinuteScore, activeSpans } = await import('../src/footballData.js');
+const { createBet, groupBets, betsForMatch, allRecords } = await import('../src/bets.js');
+const { summarise } = await import('../src/settle.js');
 
 const db = getDb();
 const userId = Number(
@@ -63,4 +64,43 @@ test('knockout match settled on the 90-minute score, not after extra time', () =
   const draw = bet(4, { bet_type: '1X2', pick: 'DRAW' });
   upsertMatches([apiMatch(4, 'FINISHED', { duration: 'EXTRA_TIME', fullTime: { home: 2, away: 1 }, regularTime: { home: 1, away: 1 } })]);
   assert.equal(get(draw).result, 'WON');
+});
+
+test('a postponed match that is rescheduled reopens its voided bets, which then settle normally', () => {
+  upsertMatches([apiMatch(5, 'TIMED', {})]);
+  const a = bet(5, { bet_type: '1X2', pick: 'HOME' });
+  upsertMatches([apiMatch(5, 'POSTPONED', {})]);
+  assert.equal(get(a).result, 'VOID');
+  upsertMatches([apiMatch(5, 'TIMED', {})]);
+  assert.deepEqual({ ...get(a) }, { result: 'PENDING', profit_cents: null });
+  upsertMatches([apiMatch(5, 'FINISHED', { fullTime: { home: 1, away: 0 } })]);
+  assert.equal(get(a).result, 'WON');
+});
+
+test('activeSpans: finished-without-score stays active; old stuck matches drop out of the window', () => {
+  const at = (id, status, utcDate, score = {}) => ({ ...apiMatch(id, status, score), utcDate, competition: { code: 'CL', name: 'Champions League' } });
+  const now = Date.parse('2026-11-20T12:00:00Z');
+  upsertMatches([
+    at(10, 'FINISHED', '2026-11-19T20:00:00Z', { fullTime: { home: null, away: null } }), // no score yet
+    at(11, 'SUSPENDED', '2026-10-01T20:00:00Z'), // stuck, outside the lookback
+    at(12, 'FINISHED', '2026-11-18T20:00:00Z', { fullTime: { home: 1, away: 1 } }), // done
+  ]);
+  const cl = activeSpans(now).find((s) => s.competition === 'CL');
+  assert.deepEqual({ first: cl.first, last: cl.last }, { first: '2026-11-19T20:00:00Z', last: '2026-11-19T20:00:00Z' });
+});
+
+test('allRecords and groupBets count members by id, not display name', () => {
+  const twin = Number(
+    db.prepare("INSERT INTO users (username, display_name, password, created_at) VALUES ('t2', 'T', 'x', '2026-01-01')").run().lastInsertRowid
+  );
+  upsertMatches([apiMatch(20, 'TIMED', {})]);
+  bet(20, { bet_type: '1X2', pick: 'DRAW' });
+  createBet(twin, 20, { pick: 'DRAW', line: null, cs_home: null, cs_away: null, other_text: null, odds_100: 300, stake_cents: 500, description: null, bet_type: '1X2' });
+  const [g] = groupBets(betsForMatch(20), { home_team: 'Home', away_team: 'Away' });
+  assert.deepEqual(g.people, [{ name: 'T', count: 1 }, { name: 'T', count: 1 }]);
+
+  const recs = allRecords();
+  const expected = summarise(db.prepare('SELECT result, profit_cents FROM bets WHERE user_id = ?').all(userId));
+  assert.deepEqual({ ...recs[userId] }, expected);
+  assert.deepEqual({ ...recs[twin] }, { total: 1, wins: 0, losses: 0, pending: 1, netCents: 0 });
 });

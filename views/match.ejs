@@ -20,11 +20,11 @@
 <% if (open) { %>
 <section class="panel">
   <h2>Post a bet</h2>
-  <% if (duplicates) { %>
+  <% if (duplicates) { const dupNames = [...new Map(duplicates.map(d => [d.user_id, d.display_name])).values()]; %>
     <div class="flash flash-warn">
       <strong>Already bought:</strong>
-      <%= [...new Set(duplicates.map(d => d.display_name))].join(', ') %>
-      <%= duplicates.length === 1 ? 'has' : 'have' %> already posted <em><%= b.selectionLabel({ ...form, ...duplicates[0] }, match) %></em> on this match.
+      <%= dupNames.join(', ') %>
+      <%= dupNames.length === 1 ? 'has' : 'have' %> already posted <em><%= b.selectionLabel({ ...form, ...duplicates[0] }, match) %></em> on this match.
       Post it anyway?
     </div>
   <% } %>

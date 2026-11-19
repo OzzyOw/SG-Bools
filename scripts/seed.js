@@ -2,7 +2,7 @@
 //   npm run seed
 // Needs FOOTBALL_DATA_API_KEY in .env (stops before touching anything if it's missing).
 import { getDb, tx, nowIso, setMeta } from '../src/db.js';
-import { fetchMatches, upsertMatches, COMPETITIONS, hasApiKey } from '../src/footballData.js';
+import { fetchMatches, upsertMatches, ninetyMinuteScore, COMPETITIONS, hasApiKey } from '../src/footballData.js';
 import { createBet, settleMatch, settleOtherBet } from '../src/bets.js';
 import { rnd, rint, pick, weighted, randomSelection, makeBet, addPendingBets } from './demo-bets.js';
 
@@ -33,6 +33,15 @@ for (const c of COMPETITIONS) {
   apiMatches.push(...(await fetchMatches(c, new Date(now - 30 * DAY), new Date(now + 7 * DAY))));
 }
 
+const since = now - 30 * DAY;
+const finishedFromApi = apiMatches.filter(
+  (m) => m.status === 'FINISHED' && ninetyMinuteScore(m.score)[0] != null && Date.parse(m.utcDate) >= since
+);
+if (!finishedFromApi.length) {
+  console.error('No finished matches in the last 30 days came back from the API — cannot build settled bets. Nothing was changed.');
+  process.exit(1);
+}
+
 // ---------- wipe + insert ----------
 const db = getDb();
 tx(() => {
@@ -51,12 +60,7 @@ const users = MEMBERS.map((m) => {
 
 const finished = db
   .prepare("SELECT * FROM matches WHERE status = 'FINISHED' AND home_score IS NOT NULL AND kickoff_utc >= ? ORDER BY kickoff_utc")
-  .all(new Date(now - 30 * DAY).toISOString());
-
-if (!finished.length) {
-  console.error('No finished matches in the last 30 days came back from the API — cannot build settled bets.');
-  process.exit(1);
-}
+  .all(new Date(since).toISOString());
 
 // Past bets: 20–25 per member. Sometimes copy a bet someone already made on the same match
 // ("following a tip"), occasionally the same member buys the same bet twice.

@@ -1,12 +1,15 @@
 // football-data.org client + background sync.
 // Free plan: 10 requests/minute. Each sync run makes at most one request per competition.
 import { getDb, getMeta, setMeta, nowIso } from './db.js';
-import { settleMatch, SETTLE_STATUSES, VOID_STATUSES } from './bets.js';
+import { settleMatch, reopenVoidedBets, SETTLE_STATUSES, VOID_STATUSES } from './bets.js';
 
 export const COMPETITIONS = ['PL', 'CL'];
 const API = 'https://api.football-data.org/v4';
 const FINAL_STATUSES = [...SETTLE_STATUSES, ...VOID_STATUSES];
 const DAY = 24 * 60 * 60 * 1000;
+// How far back syncActive looks for unfinished matches. Bounds the request's date span, so one
+// match the API never finalises (suspended, dropped) can't make every sync fetch a growing range.
+const ACTIVE_LOOKBACK_DAYS = 10;
 
 export function hasApiKey() {
   return Boolean(process.env.FOOTBALL_DATA_API_KEY);
@@ -56,6 +59,8 @@ export function upsertMatches(apiMatches) {
       m.utcDate, m.status, hs, as, nowIso());
     if (FINAL_STATUSES.includes(m.status)) {
       settled += settleMatch(d.prepare('SELECT * FROM matches WHERE id = ?').get(m.id));
+    } else {
+      reopenVoidedBets(m); // postponed match rescheduled
     }
   }
   return settled;
@@ -76,17 +81,25 @@ export async function syncUpcoming() {
 }
 
 /**
- * Matches that have kicked off but are not final yet (live, just finished, or missed while the
- * laptop was off). Re-fetch the date span they cover, one request per competition.
+ * Matches from the last ACTIVE_LOOKBACK_DAYS that have kicked off but are not settled yet
+ * (live, just finished, finished without a score yet, or missed while the laptop was off).
+ * Re-fetch the date span they cover, one request per competition.
  */
-export async function syncActive() {
-  const d = getDb();
-  const placeholders = FINAL_STATUSES.map(() => '?').join(',');
-  const active = d
+export function activeSpans(now = Date.now()) {
+  const ph = (list) => list.map(() => '?').join(',');
+  return getDb()
     .prepare(`SELECT competition, MIN(kickoff_utc) AS first, MAX(kickoff_utc) AS last
-              FROM matches WHERE kickoff_utc <= ? AND status NOT IN (${placeholders})
+              FROM matches
+              WHERE kickoff_utc <= ? AND kickoff_utc >= ?
+                AND (status NOT IN (${ph(FINAL_STATUSES)})
+                     OR (status IN (${ph(SETTLE_STATUSES)}) AND home_score IS NULL))
               GROUP BY competition`)
-    .all(nowIso(), ...FINAL_STATUSES);
+    .all(new Date(now).toISOString(), new Date(now - ACTIVE_LOOKBACK_DAYS * DAY).toISOString(),
+      ...FINAL_STATUSES, ...SETTLE_STATUSES);
+}
+
+export async function syncActive() {
+  const active = activeSpans();
   let settled = 0;
   for (const a of active) {
     const ms = await fetchMatches(a.competition, new Date(a.first), new Date(Math.max(Date.parse(a.last), Date.now())));
